@@ -1,26 +1,20 @@
-# Virtual environment
+# Virtual Environment
 venv/
-env/
-.env/
-
-# Python cache files
 __pycache__/
-*.py[cod]
-*$py.class
+*.pyc
 
-# Distribution / packaging
-dist/
-build/
-*.egg-info/
+# Data directories
+data/municipal_docs/*
+data/processed/*
+data/embeddings/*
 
-# IDE settings
-.vscode/
-.idea/
-
-# Local development settings
+# Environment variables
 .env
-*.log
+
+# IDE files
+.vscode/
+*.swp
+*.swo
 
 # System files
 .DS_Store
-Thumbs.db
