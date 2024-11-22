@@ -1,0 +1,36 @@
+[33m2be87de[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m Clean up project structure and organize files
+[33m193d6b9[m Add .gitignore and remove virtual environment files
+[33m6123fc0[m goooo
+[33m8ccc65d[m Update README.md
+[33mfb0236a[m Update README.md
+[33m66f3ee9[m Update README.md
+[33me5be587[m Update README.md
+[33m47ee614[m Update README.md
+[33md737f0f[m add index.html
+[33mcfa1c2e[m add vertexai search index creation steps
+[33m5c809bf[m add vertexai search index creation steps
+[33m3fb0903[m add vertexai search index creation steps
+[33m4f4dccc[m add data ingestion components
+[33m1c1da70[m add data ingestion components
+[33m455ba4c[m Create CONTRIBUTING.md
+[33mb08cf8f[m Update app.py
+[33m68b6a0e[m Update README.md
+[33m6078f6e[m Update README.md
+[33mfb5a653[m Update README.md
+[33m118a3ec[m Update README.md
+[33m98640e6[m Update README.md
+[33m2c8db7c[m Update README.md
+[33m565017e[m Rename LICENSE.md to LICENSE
+[33m427d4b0[m Update LICENSE.md
+[33m4bac95d[m Create LICENSE.md
+[33madc2b5e[m Create README.md
+[33me4278a2[m add more contextual prompt
+[33m8360f46[m add more contextual prompt
+[33m0fd225e[m add more contextual prompt
+[33m86aabb7[m add more contextual prompt
+[33mb75922e[m add banned phrases
+[33ma4decd9[m first version v01
+[33me5df6af[m first version v01
+[33mb1b1f1e[m first version v01
+[33m75c06b5[m first version v01
+[33med0d259[m first version v01
