@@ -2,88 +2,145 @@
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-
+#
 #  https://www.apache.org/licenses/LICENSE-2.0
 
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-import lxml.etree as ET
-from weasyprint import HTML
-from jinja2 import Environment, FileSystemLoader
-import requests
+from flask import Flask, request, jsonify
+from google.cloud import aiplatform
 from google.cloud import storage
-import logging
 import os
+import json
+import logging
 from datetime import datetime
-from flask import Flask, render_template
+from municipal_processor import MunicipalDocumentProcessor
+from embedding_generator import EmbeddingGenerator
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
+# Initialize global variables
+PROJECT_ID = "panda-17d82"
+LOCATION = "us-central1"
+BUCKET_NAME = "panda-17d82-municipal-data"
+INDEX_ID = "municipal-docs-index"
 
-def xml_to_pdf_and_upload(xml_url, template_file, gcs_bucket_name, gcs_filename):
-    # Fetch XML data from URL
-    response = requests.get(xml_url)
-    response.raise_for_status()
+# Initialize processors
+doc_processor = MunicipalDocumentProcessor(
+    project_id=PROJECT_ID,
+    location=LOCATION,
+    bucket_name=BUCKET_NAME,
+    index_id=INDEX_ID
+)
+embedding_gen = EmbeddingGenerator(
+    project_id=PROJECT_ID,
+    location=LOCATION,
+    bucket_name=BUCKET_NAME
+)
 
-    # Parse XML (handling namespaces)
-    namespaces = {'atom': 'http://www.w3.org/2005/Atom'}
-    tree = ET.fromstring(response.content)
-    root = tree
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint."""
+    return jsonify({"status": "healthy", "timestamp": datetime.utcnow().isoformat()})
 
-    # Prepare data for the template (with debugging)
-    data = {
-        'entries': []
-    }
-    for entry in root.findall('atom:entry', namespaces=namespaces):
-        data['entries'].append({
-            'title': entry.find('atom:title', namespaces=namespaces).text,
-            'updated': entry.find('atom:updated', namespaces=namespaces).text,
-            'content': entry.find('atom:content', namespaces=namespaces).text
+@app.route('/process-documents', methods=['POST'])
+def process_documents():
+    """Endpoint to trigger document processing."""
+    try:
+        data = request.get_json()
+        prefix = data.get('prefix', 'esquimalt_data/pdfs/')
+        
+        # Process documents
+        chunks = doc_processor.process_directory(prefix)
+        chunks_file = doc_processor.save_chunks(chunks)
+        
+        # Generate embeddings
+        embeddings_file = embedding_gen.process_chunks(chunks_file)
+        
+        return jsonify({
+            "status": "success",
+            "processed_documents": len(chunks),
+            "chunks_file": chunks_file,
+            "embeddings_file": embeddings_file
         })
-    print("DEBUG: Data prepared for template:", data)  # Debugging output
+    
+    except Exception as e:
+        logger.error(f"Error processing documents: {str(e)}")
+        return jsonify({
+            "status": "error",
+            "error": str(e)
+        }), 500
 
-    # Template Setup
-    file_loader = FileSystemLoader('templates')
-    env = Environment(loader=file_loader)
-    template = env.get_template(template_file)
+@app.route('/query', methods=['POST'])
+def query_documents():
+    """Endpoint to query the vector index."""
+    try:
+        data = request.get_json()
+        query = data.get('query')
+        if not query:
+            return jsonify({"error": "No query provided"}), 400
+        
+        # Initialize Vertex AI
+        aiplatform.init(project=PROJECT_ID, location=LOCATION)
+        
+        # Get the index
+        index = aiplatform.MatchingEngineIndex(index_id=INDEX_ID)
+        
+        # Query the index
+        response = index.find_neighbors(
+            query_vectors=[query],
+            num_neighbors=5
+        )
+        
+        # Format results
+        results = []
+        for neighbor in response[0]:
+            results.append({
+                "text": neighbor.text,
+                "metadata": neighbor.metadata,
+                "score": float(neighbor.distance)
+            })
+        
+        return jsonify({
+            "query": query,
+            "results": results
+        })
+    
+    except Exception as e:
+        logger.error(f"Error querying index: {str(e)}")
+        return jsonify({
+            "status": "error",
+            "error": str(e)
+        }), 500
 
-    # Render HTML output
-    html_content = template.render(data)
-
-    # Generate PDF (with optional WeasyPrint debugging)
-    logging.basicConfig(level=logging.DEBUG)  # Enable WeasyPrint logging
-    HTML(string=html_content).write_pdf('temp_output.pdf')
-
-    # Upload PDF to Google Cloud Storage
-    storage_client = storage.Client()
-    bucket = storage_client.bucket(gcs_bucket_name)
-    blob = bucket.blob(gcs_filename)
-    blob.upload_from_filename('temp_output.pdf')
-
-@app.route('/trigger-pdf', methods=['POST'])
-def generate_pdf_and_upload():
-    template_file = 'xml_template.html'  # Make sure this exists under templates/ directory!
-    gcs_bucket_name = 'knowedge-rag'  # Replace with your bucket name, this is the bucket name that will store the source PDF files.
-    # Get today's date and format
-    today_str = datetime.now().strftime('%Y%m%d')
-    with open('feed_urls.txt', 'r') as file:
-        try:
-            for line in file:
-                product_name, xml_url = line.strip().split()
-                gcs_filename = f'{product_name}_release_notes_{today_str}.pdf'
-                xml_to_pdf_and_upload(xml_url, template_file, gcs_bucket_name, gcs_filename)
-        except FileNotFoundError:
-            print("Error: 'feed_urls.txt' file not found.")  # Handle the error
-        except Exception as e:
-            print(f"An unexpected error occurred: {e}")  # Catch other potential errors
-    return 'PDF Generation Complete', 200
-
+@app.route('/stats', methods=['GET'])
+def get_stats():
+    """Get system statistics."""
+    try:
+        storage_client = storage.Client()
+        bucket = storage_client.bucket(BUCKET_NAME)
+        
+        # Count documents
+        pdf_count = len(list(bucket.list_blobs(prefix='esquimalt_data/pdfs/')))
+        processed_count = len(list(bucket.list_blobs(prefix='processed/')))
+        embeddings_count = len(list(bucket.list_blobs(prefix='embeddings/')))
+        
+        return jsonify({
+            "total_pdfs": pdf_count,
+            "processed_documents": processed_count,
+            "embedding_files": embeddings_count,
+            "last_updated": datetime.utcnow().isoformat()
+        })
+    
+    except Exception as e:
+        logger.error(f"Error getting stats: {str(e)}")
+        return jsonify({
+            "status": "error",
+            "error": str(e)
+        }), 500
 
 if __name__ == '__main__':
-    app.run(debug=True, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
-
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port, debug=True)
